@@ -38,12 +38,10 @@ class Crew(BaseModel):
         id: A unique identifier for the crew instance.
     """
 
-    __hash__ = object.__hash__
+    __hash__ = object.__hash__  # type: ignore
     _rpm_controller: RPMController = PrivateAttr()
     _logger: Logger = PrivateAttr()
-    _cache_handler: Optional[InstanceOf[CacheHandler]] = PrivateAttr(
-        default=CacheHandler()
-    )
+    _cache_handler: InstanceOf[CacheHandler] = PrivateAttr(default=CacheHandler())
     model_config = ConfigDict(arbitrary_types_allowed=True)
     tasks: List[Task] = Field(default_factory=list)
     agents: List[Agent] = Field(default_factory=list)
@@ -69,20 +67,20 @@ class Crew(BaseModel):
                 "may_not_set_field", "The 'id' field cannot be set by the user.", {}
             )
 
-    @classmethod
     @field_validator("config", mode="before")
+    @classmethod
     def check_config_type(
         cls, v: Union[Json, Dict[str, Any]]
     ) -> Union[Json, Dict[str, Any]]:
         """Validates that the config is a valid type.
-
         Args:
             v: The config to be validated.
-
         Returns:
             The config if it is valid.
         """
-        return json.loads(v) if isinstance(v, Json) else v
+
+        # TODO: Improve typing
+        return json.loads(v) if isinstance(v, Json) else v  # type: ignore
 
     @model_validator(mode="after")
     def set_private_attrs(self) -> "Crew":
@@ -112,6 +110,8 @@ class Crew(BaseModel):
         return self
 
     def _setup_from_config(self):
+        assert self.config is not None, "Config should not be None."
+
         """Initializes agents and tasks from the provided config."""
         if not self.config.get("agents") or not self.config.get("tasks"):
             raise PydanticCustomError(
@@ -142,30 +142,66 @@ class Crew(BaseModel):
             agent.i18n = I18N(language=self.language)
 
         if self.process == Process.sequential:
-            return self._sequential_loop()
+            return self._run_sequential_process()
+        if self.process == Process.hierarchical:
+            return self._run_hierarchical_process()
 
-    def _sequential_loop(self) -> str:
+        raise NotImplementedError(
+            f"The process '{self.process}' is not implemented yet."
+        )
+
+    def _run_sequential_process(self) -> str:
         """Executes tasks sequentially and returns the final output."""
-        task_output = None
+        task_output = ""
         for task in self.tasks:
-            self._prepare_and_execute_task(task)
-            task_output = task.execute(task_output)
+            if task.agent is not None and task.agent.allow_delegation:
+                agents_for_delegation = [
+                    agent for agent in self.agents if agent != task.agent
+                ]
+                task.tools += AgentTools(agents=agents_for_delegation).tools()
+
+            role = task.agent.role if task.agent is not None else "None"
+            self._logger.log("debug", f"Working Agent: {role}")
+            self._logger.log("info", f"Starting Task: {task.description}")
+
+            output = task.execute(context=task_output)
+            if not task.async_execution:
+                task_output = output
+
+            role = task.agent.role if task.agent is not None else "None"
+            self._logger.log("debug", f"[{role}] Task output: {task_output}\n\n")
+
+        if self.max_rpm:
+            self._rpm_controller.stop_rpm_counter()
+
+        return task_output
+
+    def _run_hierarchical_process(self) -> str:
+        """Creates and assigns a manager agent to make sure the crew completes the tasks."""
+
+        i18n = I18N(language=self.language)
+        manager = Agent(
+            role=i18n.retrieve("hierarchical_manager_agent", "role"),
+            goal=i18n.retrieve("hierarchical_manager_agent", "goal"),
+            backstory=i18n.retrieve("hierarchical_manager_agent", "backstory"),
+            tools=AgentTools(agents=self.agents).tools(),
+            verbose=True,
+        )
+
+        task_output = ""
+        for task in self.tasks:
+            self._logger.log("debug", f"Working Agent: {manager.role}")
+            self._logger.log("info", f"Starting Task: {task.description}")
+
+            task_output = task.execute(
+                agent=manager, context=task_output, tools=manager.tools
+            )
+
             self._logger.log(
-                "debug", f"[{task.agent.role}] Task output: {task_output}\n\n"
+                "debug", f"[{manager.role}] Task output: {task_output}\n\n"
             )
 
         if self.max_rpm:
             self._rpm_controller.stop_rpm_counter()
+
         return task_output
-
-    def _prepare_and_execute_task(self, task: Task) -> None:
-        """Prepares and logs information about the task being executed.
-
-        Args:
-            task: The task to be executed.
-        """
-        if task.agent.allow_delegation:
-            task.tools += AgentTools(agents=self.agents).tools()
-
-        self._logger.log("debug", f"Working Agent: {task.agent.role}")
-        self._logger.log("info", f"Starting Task: {task.description}")
