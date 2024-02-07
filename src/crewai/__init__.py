@@ -1,7 +1,7 @@
 import os
 from crewai import Agent, Task, Crew, Process
 
-os.environ["OPENAI_API_KEY"] = "PUT YOUR KEY HERE"
+os.environ["OPENAI_API_KEY"] = "PUT YOUR KEY HERE OBTAIN FROM OFFICIAL OPENAI WEBSITE"
 
 from langchain.tools import DuckDuckGoSearchRun
 search_tool = DuckDuckGoSearchRun()
