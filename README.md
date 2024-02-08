@@ -2,6 +2,8 @@
 
 CrewAI is a powerful framework designed for orchestrating role-playing, autonomous AI agents to work together collaboratively to tackle complex tasks. It is built on top of LangChain and is intended to empower agents with collaborative intelligence, allowing them to function as a cohesive unit, much like a well-oiled crew.
 
+![Overview](crewAI-mindmap.png)
+
 ## Key Features
 
 - **Role-Based Agent Design**: Customize agents with specific roles, goals, and tools.
